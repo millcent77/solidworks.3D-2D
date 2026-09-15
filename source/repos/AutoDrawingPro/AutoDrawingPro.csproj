@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Platforms>AnyCPU;x64</Platforms>
+  </PropertyGroup>
+
+	<ItemGroup>
+		<Reference Include="SolidWorks.Interop.sldworks">
+			<HintPath>C:\Program Files\SolidWorks Corp\SolidWorks\SolidWorks.Interop.sldworks.dll</HintPath>
+			<EmbedInteropTypes>False</EmbedInteropTypes>
+		</Reference>
+		<Reference Include="SolidWorks.Interop.swconst">
+			<HintPath>C:\Program Files\SolidWorks Corp\SolidWorks\SolidWorks.Interop.swconst.dll</HintPath>
+			<EmbedInteropTypes>False</EmbedInteropTypes>
+		</Reference>
+	</ItemGroup>
+
+</Project>
