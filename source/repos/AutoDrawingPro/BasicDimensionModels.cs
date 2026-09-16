@@ -13,6 +13,22 @@ namespace AutoDrawingPro
         Radius
     }
 
+    internal enum PartCategory
+    {
+        Unclassified,
+        Stamping,
+        Machining,
+        Casting,
+        Mold
+    }
+
+    internal enum DimensionReviewStatus
+    {
+        Green,
+        Yellow,
+        Red
+    }
+
     internal enum DimensionFeatureType
     {
         OverallBoundingBox,
@@ -73,6 +89,18 @@ namespace AutoDrawingPro
         public bool Created { get; set; }
 
         public int PlacementOrder { get; set; }
+
+        public DimensionReviewStatus ReviewStatus { get; set; } = DimensionReviewStatus.Yellow;
+
+        public bool IsSelected { get; set; }
+
+        public bool CanSelect { get; set; } = true;
+
+        public string ReviewReason { get; set; } = "";
+
+        public string RuleName { get; set; } = "";
+
+        public string EngineerNote { get; set; } = "";
 
         public string Result => Created ? "已创建" : "未创建";
     }

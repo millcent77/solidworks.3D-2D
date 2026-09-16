@@ -74,7 +74,7 @@
   - `SolidWorks.Interop.sldworks.dll`
   - `SolidWorks.Interop.swconst.dll`
 
-项目默认从以下位置引用 SolidWorks Interop：
+项目默认从以下位置引用 SolidWorks Interop。该路径是本机安装示例，如 SolidWorks 安装目录不同，请在项目引用中改为实际路径：
 
 ```text
 C:\Program Files\SolidWorks Corp\SolidWorks\
@@ -82,14 +82,14 @@ C:\Program Files\SolidWorks Corp\SolidWorks\
 
 #### 编译
 
-在项目根目录执行：
+以下命令中的 `D:\AutoDrawing` 是示例项目路径。请根据实际克隆或解压位置进入项目目录后执行：
 
 ```powershell
 cd D:\AutoDrawing\source\repos\AutoDrawingPro
 dotnet build AutoDrawingPro.csproj -c Release -p:Platform=x64
 ```
 
-编译成功后程序位于：
+编译成功后，程序通常位于当前项目的 `bin` 输出目录，例如：
 
 ```text
 D:\AutoDrawing\source\repos\AutoDrawingPro\bin\x64\Release\net8.0-windows\AutoDrawingPro.exe
@@ -99,7 +99,7 @@ D:\AutoDrawing\source\repos\AutoDrawingPro\bin\x64\Release\net8.0-windows\AutoDr
 
 1. 启动 SolidWorks 2025。
 2. 启动 `AutoDrawingPro.exe`。
-3. 在程序界面确认目录：
+3. 在程序界面确认目录。以下目录为默认示例，可在程序界面修改：
 
 ```text
 监听输入目录: D:\AutoDrawingServer\Input
@@ -118,6 +118,8 @@ D:\AutoDrawing\source\repos\AutoDrawingPro\bin\x64\Release\net8.0-windows\AutoDr
 
 #### 输入示例
 
+以下路径仅为示例，可替换为你的实际输入目录：
+
 ```text
 D:\AutoDrawingServer\Input\Bracket.SLDPRT
 D:\AutoDrawingServer\Input\Housing.x_t
@@ -125,6 +127,8 @@ D:\AutoDrawingServer\Input\MoldPlate.x_b
 ```
 
 #### 输出示例
+
+以下路径仅为示例，实际输出位置以程序界面中配置的输出目录为准：
 
 ```text
 D:\AutoDrawingServer\Output\SLDDRW\Bracket.slddrw
@@ -213,7 +217,7 @@ The current focus is stable drawing generation, basic dimension candidates, and 
   - `SolidWorks.Interop.sldworks.dll`
   - `SolidWorks.Interop.swconst.dll`
 
-The project references SolidWorks Interop assemblies from:
+The project references SolidWorks Interop assemblies from the local SolidWorks installation. The path below is an example; update the project references if SolidWorks is installed elsewhere:
 
 ```text
 C:\Program Files\SolidWorks Corp\SolidWorks\
@@ -221,14 +225,14 @@ C:\Program Files\SolidWorks Corp\SolidWorks\
 
 #### Build
 
-Run the following commands from the project root:
+The `D:\AutoDrawing` path below is an example project location. Replace it with the folder where you cloned or extracted this project:
 
 ```powershell
 cd D:\AutoDrawing\source\repos\AutoDrawingPro
 dotnet build AutoDrawingPro.csproj -c Release -p:Platform=x64
 ```
 
-After a successful build, the executable is located at:
+After a successful build, the executable is usually located under the current project's `bin` output folder, for example:
 
 ```text
 D:\AutoDrawing\source\repos\AutoDrawingPro\bin\x64\Release\net8.0-windows\AutoDrawingPro.exe
@@ -238,7 +242,7 @@ D:\AutoDrawing\source\repos\AutoDrawingPro\bin\x64\Release\net8.0-windows\AutoDr
 
 1. Start SolidWorks 2025.
 2. Start `AutoDrawingPro.exe`.
-3. Confirm the folders in the application:
+3. Confirm the folders in the application. The folders below are default examples and can be changed in the application:
 
 ```text
 Input folder: D:\AutoDrawingServer\Input
@@ -257,6 +261,8 @@ Drawing template folder: D:\AutoDrawingServer\Templates
 
 #### Input Examples
 
+The following paths are examples. Replace them with your actual input folder:
+
 ```text
 D:\AutoDrawingServer\Input\Bracket.SLDPRT
 D:\AutoDrawingServer\Input\Housing.x_t
@@ -264,6 +270,8 @@ D:\AutoDrawingServer\Input\MoldPlate.x_b
 ```
 
 #### Output Examples
+
+The following paths are examples. The actual output location follows the output folder configured in the application:
 
 ```text
 D:\AutoDrawingServer\Output\SLDDRW\Bracket.slddrw

@@ -23,38 +23,73 @@ namespace AutoDrawingPro
             SolidWorks.Interop.sldworks.ModelDoc2 drawingModel,
             string inputKind)
         {
-            Stopwatch stopwatch = Stopwatch.StartNew();
+            IReadOnlyDictionary<PartCategory, PartDimensionRule> rules = PartClassificationRules.CreateDefaultRules(_settings);
+            PartDimensionRule rule = rules[PartCategory.Unclassified];
+            List<DimensionCandidate> candidates = BuildDimensionCandidates(partModel, drawing, inputKind, rule);
+            foreach (DimensionCandidate candidate in candidates.Where(c => c.IsSelected))
+            {
+                candidate.IsSelected = false;
+            }
+
+            return ApplyConfirmedDimensions(swApp, drawing, drawingModel, candidates);
+        }
+
+        public List<DimensionCandidate> BuildDimensionCandidates(
+            SolidWorks.Interop.sldworks.ModelDoc2 partModel,
+            SolidWorks.Interop.sldworks.DrawingDoc drawing,
+            string inputKind,
+            PartDimensionRule rule)
+        {
             BasicDimensionResult result = new();
 
             if (!_settings.EnableBasicDimensions)
             {
                 _log("[基础尺寸] EnableBasicDimensions=false，跳过阶段二尺寸。");
-                return result;
+                return new List<DimensionCandidate>();
             }
 
-            _log($"[基础尺寸] 开始建立候选尺寸，尺寸来源={(inputKind.Equals("Parasolid", StringComparison.OrdinalIgnoreCase) ? "几何推断" : "模型特征/几何推断")}");
+            _log($"[基础尺寸] 开始建立候选尺寸，分类规则={rule.Name}，尺寸来源={(inputKind.Equals("Parasolid", StringComparison.OrdinalIgnoreCase) ? "几何推断" : "模型特征/几何推断")}");
 
             List<DimensionCandidate> candidates = BuildCandidates(partModel, drawing, inputKind, result);
-            result.CandidateCount = candidates.Count;
-
             MarkDuplicates(candidates);
             RejectInvalidCandidates(candidates, result);
-            SelectReadableDimensionSet(candidates);
+            ApplyClassificationRule(candidates, rule);
+            SelectReadableDimensionSet(candidates, rule);
 
-            List<DimensionCandidate> selected = candidates
-                .Where(c => string.IsNullOrWhiteSpace(c.RejectionReason))
+            List<DimensionCandidate> ordered = candidates
+                .Where(c => c.CanSelect && string.IsNullOrWhiteSpace(c.RejectionReason))
                 .OrderByDescending(c => c.Priority)
                 .ToList();
+            EnforceDimensionLimits(ordered, result, rule);
+            ApplyReviewDefaults(candidates, rule);
 
-            EnforceDimensionLimits(selected, result);
+            _log($"[基础尺寸候选] 分类={rule.Name} 候选={candidates.Count} 绿色={candidates.Count(c => c.ReviewStatus == DimensionReviewStatus.Green)} 黄色={candidates.Count(c => c.ReviewStatus == DimensionReviewStatus.Yellow)} 红色={candidates.Count(c => c.ReviewStatus == DimensionReviewStatus.Red)}");
+            foreach (DimensionCandidate candidate in candidates)
+            {
+                LogCandidate(candidate);
+            }
 
-            foreach (DimensionCandidate candidate in selected.Where(c => string.IsNullOrWhiteSpace(c.RejectionReason)))
+            return candidates;
+        }
+
+        public BasicDimensionResult ApplyConfirmedDimensions(
+            SwAppClass swApp,
+            SolidWorks.Interop.sldworks.DrawingDoc drawing,
+            SolidWorks.Interop.sldworks.ModelDoc2 drawingModel,
+            IEnumerable<DimensionCandidate> confirmedCandidates)
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            BasicDimensionResult result = new();
+            List<DimensionCandidate> candidates = confirmedCandidates.ToList();
+            result.CandidateCount = candidates.Count;
+
+            foreach (DimensionCandidate candidate in candidates.Where(c => c.IsSelected && c.CanSelect))
             {
                 TryCreateDimension(swApp, drawing, drawingModel, candidate, result);
                 LogCandidate(candidate);
             }
 
-            foreach (DimensionCandidate candidate in candidates.Where(c => !c.Created && !string.IsNullOrWhiteSpace(c.RejectionReason)))
+            foreach (DimensionCandidate candidate in candidates.Where(c => !c.Created && (!c.IsSelected || !c.CanSelect)))
             {
                 LogCandidate(candidate);
             }
@@ -66,17 +101,12 @@ namespace AutoDrawingPro
                 result.Warnings.Add("本次没有成功创建尺寸。请检查日志中的几何引用选择失败、视图实体不可选或模板比例问题。");
             }
 
-            if (inputKind.Equals("Parasolid", StringComparison.OrdinalIgnoreCase))
+            if (result.AssociationRejectedCount > 0 || result.SpaceRejectedCount > 0)
             {
-                result.Warnings.Add("模型为X_T/X_B导入件，尺寸来源为几何推断，请工程师检查基准、重要尺寸、公差及加工要求。");
+                result.Warnings.Add("存在被拒绝的确认尺寸，工程图已生成基础尺寸，请工程师检查。");
             }
 
-            if (result.AssociationRejectedCount > 0 || result.SpaceRejectedCount > 0 || result.DuplicateCount > 0 || result.AmbiguousCount > 0)
-            {
-                result.Warnings.Add("存在被拒绝的候选尺寸，工程图已生成基础尺寸，请工程师检查。");
-            }
-
-            _log($"[基础尺寸汇总] 候选={result.CandidateCount} 创建={result.CreatedCount} 重复={result.DuplicateCount} 歧义={result.AmbiguousCount} 空间不足={result.SpaceRejectedCount} 无法关联={result.AssociationRejectedCount} 耗时={stopwatch.Elapsed}");
+            _log($"[基础尺寸汇总] 候选={result.CandidateCount} 确认={candidates.Count(c => c.IsSelected)} 创建={result.CreatedCount} 空间不足={result.SpaceRejectedCount} 无法关联={result.AssociationRejectedCount} 耗时={stopwatch.Elapsed}");
             foreach (var item in result.DimensionsPerView)
             {
                 _log($"[基础尺寸汇总] 视图={item.Key} 尺寸数={item.Value}");
@@ -452,7 +482,82 @@ namespace AutoDrawingPro
             }
         }
 
-        private void SelectReadableDimensionSet(List<DimensionCandidate> candidates)
+        private void ApplyClassificationRule(List<DimensionCandidate> candidates, PartDimensionRule rule)
+        {
+            foreach (DimensionCandidate candidate in candidates)
+            {
+                candidate.RuleName = rule.Name;
+
+                if (!rule.AllowedDimensionTypes.Contains(candidate.DimensionType))
+                {
+                    candidate.ReviewStatus = DimensionReviewStatus.Red;
+                    candidate.IsSelected = false;
+                    candidate.ReviewReason = $"当前分类规则不允许该尺寸类型: {candidate.DimensionType}";
+                    candidate.RejectionReason = string.IsNullOrWhiteSpace(candidate.RejectionReason)
+                        ? candidate.ReviewReason
+                        : candidate.RejectionReason;
+                    continue;
+                }
+
+                if (candidate.ValueMm > 0 && candidate.ValueMm < rule.MinimumFeatureSize)
+                {
+                    candidate.ReviewStatus = DimensionReviewStatus.Red;
+                    candidate.IsSelected = false;
+                    candidate.ReviewReason = $"小于当前分类最小特征尺寸 {rule.MinimumFeatureSize:F2}mm";
+                    candidate.RejectionReason = candidate.ReviewReason;
+                    continue;
+                }
+
+                if (rule.Priorities.TryGetValue(candidate.DimensionType, out int priority))
+                {
+                    candidate.Priority = priority;
+                }
+            }
+        }
+
+        private void ApplyReviewDefaults(List<DimensionCandidate> candidates, PartDimensionRule rule)
+        {
+            foreach (DimensionCandidate candidate in candidates)
+            {
+                if (candidate.FeatureType != DimensionFeatureType.OverallBoundingBox && candidate.Reference1 == null)
+                {
+                    candidate.ReviewStatus = DimensionReviewStatus.Red;
+                    candidate.IsSelected = false;
+                    candidate.CanSelect = false;
+                    candidate.ReviewReason = "无法建立几何关联，禁止选中";
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(candidate.RejectionReason) || candidate.IsDuplicate)
+                {
+                    candidate.ReviewStatus = DimensionReviewStatus.Red;
+                    candidate.IsSelected = false;
+                    candidate.CanSelect = !string.IsNullOrWhiteSpace(candidate.RejectionReason)
+                        ? !candidate.RejectionReason.Contains("缺少可关联", StringComparison.OrdinalIgnoreCase)
+                        : candidate.CanSelect;
+                    candidate.ReviewReason = string.IsNullOrWhiteSpace(candidate.ReviewReason)
+                        ? candidate.RejectionReason
+                        : candidate.ReviewReason;
+                    continue;
+                }
+
+                if (candidate.IsAmbiguous || !rule.AllowAutoKeep)
+                {
+                    candidate.ReviewStatus = DimensionReviewStatus.Yellow;
+                    candidate.IsSelected = false;
+                    candidate.ReviewReason = candidate.IsAmbiguous
+                        ? "存在歧义，需要工程师确认"
+                        : "当前分类要求人工确认";
+                    continue;
+                }
+
+                candidate.ReviewStatus = DimensionReviewStatus.Green;
+                candidate.IsSelected = true;
+                candidate.ReviewReason = "系统判断可靠，建议保留";
+            }
+        }
+
+        private void SelectReadableDimensionSet(List<DimensionCandidate> candidates, PartDimensionRule rule)
         {
             foreach (var viewGroup in candidates
                 .Where(c => string.IsNullOrWhiteSpace(c.RejectionReason))
@@ -461,19 +566,19 @@ namespace AutoDrawingPro
                 RejectOverflow(
                     viewGroup.Where(c => c.DimensionType is BasicDimensionType.HoleDiameter or BasicDimensionType.CylinderDiameter)
                         .OrderByDescending(c => c.ValueMm),
-                    _settings.MaxDiameterDimensionsPerView,
+                    Math.Min(_settings.MaxDiameterDimensionsPerView, rule.MaxDimensionsPerView),
                     "直径尺寸超过当前视图可读上限");
 
                 RejectOverflow(
                     viewGroup.Where(c => c.DimensionType == BasicDimensionType.Radius)
                         .OrderBy(c => c.ValueMm),
-                    _settings.MaxRadiusDimensionsPerView,
+                    Math.Min(_settings.MaxRadiusDimensionsPerView, rule.MaxDimensionsPerView),
                     "R角尺寸超过当前视图可读上限");
 
                 RejectOverflow(
                     viewGroup.Where(c => c.DimensionType == BasicDimensionType.CenterDistance)
                         .OrderByDescending(c => c.ValueMm),
-                    _settings.MaxCenterDistanceDimensionsPerView,
+                    Math.Min(_settings.MaxCenterDistanceDimensionsPerView, rule.MaxDimensionsPerView),
                     "中心距尺寸超过当前视图可读上限");
             }
         }
@@ -492,7 +597,7 @@ namespace AutoDrawingPro
             }
         }
 
-        private void EnforceDimensionLimits(List<DimensionCandidate> selected, BasicDimensionResult result)
+        private void EnforceDimensionLimits(List<DimensionCandidate> selected, BasicDimensionResult result, PartDimensionRule rule)
         {
             int drawingCount = 0;
             Dictionary<string, int> perView = new(StringComparer.OrdinalIgnoreCase);
@@ -505,14 +610,14 @@ namespace AutoDrawingPro
                 }
 
                 perView.TryGetValue(candidate.ViewName, out int viewCount);
-                if (viewCount >= _settings.MaxDimensionsPerView)
+                if (viewCount >= rule.MaxDimensionsPerView)
                 {
                     candidate.RejectionReason = "超过每视图尺寸上限";
                     result.SpaceRejectedCount++;
                     continue;
                 }
 
-                if (drawingCount >= _settings.MaxDimensionsPerDrawing)
+                if (drawingCount >= rule.MaxDimensionsPerDrawing)
                 {
                     candidate.RejectionReason = "超过整张工程图尺寸上限";
                     result.SpaceRejectedCount++;
@@ -846,7 +951,7 @@ namespace AutoDrawingPro
                 : "未计算";
             string result = candidate.Created ? "已创建" : "拒绝";
             string reason = candidate.Created ? "" : candidate.RejectionReason;
-            _log($"[尺寸候选] 视图={candidate.ViewName} 类型={candidate.DimensionType} 数值={value}{candidate.Unit} 来源={candidate.SourceKind} 基准={candidate.Datum} 优先级={candidate.Priority} 结果={result} 拒绝原因={reason}");
+            _log($"[尺寸候选] 视图={candidate.ViewName} 类型={candidate.DimensionType} 数值={value}{candidate.Unit} 来源={candidate.SourceKind} 基准={candidate.Datum} 状态={candidate.ReviewStatus} 选中={candidate.IsSelected} 规则={candidate.RuleName} 优先级={candidate.Priority} 结果={result} 原因={candidate.ReviewReason} 拒绝原因={reason}");
         }
 
         private static void PrepareAfterDimensions(SwAppClass swApp, SolidWorks.Interop.sldworks.ModelDoc2 drawingModel)

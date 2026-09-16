@@ -15,6 +15,14 @@ dist/
 .vs/
 bin/
 obj/
+**/.vs/
+**/bin/
+**/obj/
+*.pdb
+*.exe
+*.dll
+*.db
+*.vsidx
 
 # User-specific files
 *.user
@@ -26,3 +34,8 @@ obj/
 # Temporary files
 *.tmp
 *.bak
+
+# Local backup / generated working folders
+source/repos/backup/
+input/
+output/

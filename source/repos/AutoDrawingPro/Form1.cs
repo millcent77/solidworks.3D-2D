@@ -273,10 +273,35 @@ namespace AutoDrawingPro
 
                 LogDrawingViewDiagnostics(swDraw);
 
+                PartCategory recommendedCategory = PartClassificationRules.RecommendCategory(
+                    inputPath,
+                    preparedModel.BodyCount,
+                    preparedModel.SurfaceCount);
+                PartCategory finalCategory = recommendedCategory;
+                List<DimensionCandidate> reviewedCandidates = new();
+                BasicDimensionResult dimensionResult = new();
+
                 if (_settings.EnableBasicDimensions)
                 {
                     BasicDimensionService dimensionService = new(_settings, LogToWindow);
-                    dimensionService.ApplyBasicDimensions(swApp, swModel, swDraw, drawModel, preparedModel.InputKind);
+                    IReadOnlyDictionary<PartCategory, PartDimensionRule> rules = PartClassificationRules.CreateDefaultRules(_settings);
+                    PartDimensionRule initialRule = rules[recommendedCategory];
+                    reviewedCandidates = dimensionService.BuildDimensionCandidates(swModel, swDraw, preparedModel.InputKind, initialRule);
+
+                    bool confirmed = ReviewDimensionCandidates(
+                        reviewedCandidates,
+                        rules,
+                        recommendedCategory,
+                        Path.Combine(OutputFolder, "Drafts"),
+                        out finalCategory);
+
+                    if (!confirmed)
+                    {
+                        LogToWindow("[人工确认] 工程师取消确认，未生成正式 SLDDRW/PDF/DWG。");
+                        return false;
+                    }
+
+                    dimensionResult = dimensionService.ApplyConfirmedDimensions(swApp, swDraw, drawModel, reviewedCandidates);
                 }
                 else
                 {
@@ -295,6 +320,15 @@ namespace AutoDrawingPro
                 string drwPath = SaveSlddrw(swApp, drawModel, fileName);
                 string pdfPath = SavePdf(swApp, drawModel, fileName);
                 string dwgPath = SaveDwg(swApp, drawModel, fileName);
+                WriteReviewAuditLog(
+                    inputPath,
+                    recommendedCategory,
+                    finalCategory,
+                    reviewedCandidates,
+                    dimensionResult,
+                    drwPath,
+                    pdfPath,
+                    dwgPath);
 
                 bool success = ValidateOutputFile("SLDDRW", drwPath, 1024)
                     && ValidatePdfFile(pdfPath)
@@ -307,6 +341,7 @@ namespace AutoDrawingPro
                 }
 
                 LogToWindow($"[流水线成功] {fileName} 已稳定生成 SLDDRW/PDF/DWG，耗时={stopwatch.Elapsed}");
+                LogToWindow("[人工检查提示] 工程图已完成基础尺寸审核，但公差、形位公差、粗糙度及制造要求仍需工程师检查。");
                 return true;
             }
             catch (Exception ex)
@@ -320,6 +355,105 @@ namespace AutoDrawingPro
                 try { if (swModel != null) swApp.CloseDoc(swModel.GetTitle()); } catch { }
                 Thread.Sleep(300);
             }
+        }
+
+        private bool ReviewDimensionCandidates(
+            List<DimensionCandidate> candidates,
+            IReadOnlyDictionary<PartCategory, PartDimensionRule> rules,
+            PartCategory recommendedCategory,
+            string draftFolder,
+            out PartCategory finalCategory)
+        {
+            PartCategory selectedCategory = recommendedCategory;
+            bool confirmed = false;
+
+            void ShowReview()
+            {
+                using DimensionReviewForm form = new(
+                    candidates,
+                    rules,
+                    recommendedCategory,
+                    draftFolder,
+                    LogToWindow);
+
+                DialogResult result = form.ShowDialog(this);
+                confirmed = result == DialogResult.OK && form.Confirmed;
+                selectedCategory = form.SelectedCategory;
+            }
+
+            if (InvokeRequired)
+            {
+                Invoke(new Action(ShowReview));
+            }
+            else
+            {
+                ShowReview();
+            }
+
+            finalCategory = selectedCategory;
+            LogToWindow($"[人工确认] 推荐分类={PartClassificationRules.GetDisplayName(recommendedCategory)}，最终分类={PartClassificationRules.GetDisplayName(finalCategory)}，确认={confirmed}");
+            return confirmed;
+        }
+
+        private void WriteReviewAuditLog(
+            string inputPath,
+            PartCategory recommendedCategory,
+            PartCategory finalCategory,
+            List<DimensionCandidate> candidates,
+            BasicDimensionResult dimensionResult,
+            string drwPath,
+            string pdfPath,
+            string dwgPath)
+        {
+            try
+            {
+                string auditDir = Path.Combine(OutputFolder, "Audit");
+                Directory.CreateDirectory(auditDir);
+                string auditPath = Path.Combine(auditDir, $"{DateTime.Now:yyyy-MM-dd}.csv");
+                bool writeHeader = !File.Exists(auditPath);
+
+                int green = candidates.Count(c => c.ReviewStatus == DimensionReviewStatus.Green);
+                int yellow = candidates.Count(c => c.ReviewStatus == DimensionReviewStatus.Yellow);
+                int red = candidates.Count(c => c.ReviewStatus == DimensionReviewStatus.Red);
+                string kept = string.Join(" | ", candidates.Where(c => c.IsSelected).Select(c => $"{c.DimensionType}:{c.ValueMm:F2}{c.Unit}@{c.ViewName}"));
+                string cancelled = string.Join(" | ", candidates.Where(c => !c.IsSelected).Select(c => $"{c.DimensionType}:{c.ValueMm:F2}{c.Unit}@{c.ViewName}"));
+                string operatorName = Environment.UserName;
+
+                using StreamWriter writer = new(auditPath, append: true, System.Text.Encoding.UTF8);
+                if (writeHeader)
+                {
+                    writer.WriteLine("时间,操作人员,文件名,推荐分类,最终分类,绿色数量,黄色数量,红色数量,候选数量,最终保留数量,实际创建数量,保留尺寸,取消尺寸,SLDDRW,PDF,DWG");
+                }
+
+                writer.WriteLine(string.Join(",",
+                    Csv(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")),
+                    Csv(operatorName),
+                    Csv(inputPath),
+                    Csv(PartClassificationRules.GetDisplayName(recommendedCategory)),
+                    Csv(PartClassificationRules.GetDisplayName(finalCategory)),
+                    green,
+                    yellow,
+                    red,
+                    candidates.Count,
+                    candidates.Count(c => c.IsSelected),
+                    dimensionResult.CreatedCount,
+                    Csv(kept),
+                    Csv(cancelled),
+                    Csv(drwPath),
+                    Csv(pdfPath),
+                    Csv(dwgPath)));
+
+                LogToWindow($"[审核记录] 已写入: {auditPath}");
+            }
+            catch (Exception ex)
+            {
+                LogToWindow($"[审核记录] 写入失败: {ex.Message}");
+            }
+        }
+
+        private static string Csv(string value)
+        {
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
         }
 
         private ModelPreparationResult PrepareModelForDrawing(SwAppClass swApp, string inputPath)
